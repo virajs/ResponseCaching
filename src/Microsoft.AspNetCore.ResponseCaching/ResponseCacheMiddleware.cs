@@ -183,11 +183,19 @@ namespace Microsoft.AspNetCore.ResponseCaching
             }
 
 
-            if (context.RequestCacheControlHeaderValue.OnlyIfCached)
+            foreach (var c in context.HttpContext.Request.Headers[HeaderNames.CacheControl])
             {
-                context.HttpContext.Response.StatusCode = StatusCodes.Status504GatewayTimeout;
-                return true;
+                if (c.Equals("only-if-cached"))
+                {
+                    context.HttpContext.Response.StatusCode = StatusCodes.Status504GatewayTimeout;
+                    return true;
+                }
             }
+            // if (context.RequestCacheControlHeaderValue.OnlyIfCached)
+            // {
+            //     context.HttpContext.Response.StatusCode = StatusCodes.Status504GatewayTimeout;
+            //     return true;
+            // }
 
             return false;
         }

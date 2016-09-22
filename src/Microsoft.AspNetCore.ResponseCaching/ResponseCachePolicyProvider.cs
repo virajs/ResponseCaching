@@ -31,10 +31,17 @@ namespace Microsoft.AspNetCore.ResponseCaching
             // Verify request cache-control parameters
             if (!StringValues.IsNullOrEmpty(request.Headers[HeaderNames.CacheControl]))
             {
-                if (context.RequestCacheControlHeaderValue.NoCache)
+                foreach (var c in request.Headers[HeaderNames.CacheControl])
                 {
-                    return false;
+                    if (c.Equals("no-cache"))
+                    {
+                        return false;
+                    }
                 }
+                // if (context.RequestCacheControlHeaderValue.NoCache)
+                // {
+                //     return false;
+                // }
             }
             else
             {
@@ -61,7 +68,14 @@ namespace Microsoft.AspNetCore.ResponseCaching
             }
 
             // Check no-store
-            if (context.RequestCacheControlHeaderValue.NoStore || context.ResponseCacheControlHeaderValue.NoStore)
+            foreach (var c in context.HttpContext.Request.Headers[HeaderNames.CacheControl])
+            {
+                if (c.Equals("no-store"))
+                {
+                    return false;
+                }
+            }
+            if (/*context.RequestCacheControlHeaderValue.NoStore ||*/ context.ResponseCacheControlHeaderValue.NoStore)
             {
                 return false;
             }
@@ -145,9 +159,20 @@ namespace Microsoft.AspNetCore.ResponseCaching
             var cachedControlHeaders = context.CachedResponseHeaders.CacheControl ?? EmptyCacheControl;
 
             // Add min-fresh requirements
-            if (context.RequestCacheControlHeaderValue.MinFresh.HasValue)
+            //TimeSpan? minFresh = null;
+            foreach (var c in context.HttpContext.Request.Headers[HeaderNames.CacheControl])
             {
-                age += context.RequestCacheControlHeaderValue.MinFresh.Value;
+                var index = c.IndexOf("min-fresh");
+                if (index != -1)
+                {
+                    ++index;
+                    int seconds;
+                    if (TryParseValue(index, c, out seconds))
+                    {
+                        age += new TimeSpan(0, 0, seconds);
+                    }
+                    break;
+                }
             }
 
             // Validate shared max age, this overrides any max age settings for shared caches
@@ -158,8 +183,23 @@ namespace Microsoft.AspNetCore.ResponseCaching
             }
             else if (!cachedControlHeaders.SharedMaxAge.HasValue)
             {
+                TimeSpan? maxAge = null;
+                foreach (var c in context.HttpContext.Request.Headers[HeaderNames.CacheControl])
+                {
+                    var index = c.IndexOf("max-age");
+                    if (index != -1)
+                    {
+                        ++index;
+                        int seconds;
+                        if (TryParseValue(index, c, out seconds))
+                        {
+                            maxAge = new TimeSpan(0, 0, seconds);
+                        }
+                        break;
+                    }
+                }
                 // Validate max age
-                if (age >= cachedControlHeaders.MaxAge || age >= context.RequestCacheControlHeaderValue.MaxAge)
+                if (age >= cachedControlHeaders.MaxAge || age >= maxAge)
                 {
                     // Must revalidate
                     if (cachedControlHeaders.MustRevalidate)
@@ -168,14 +208,30 @@ namespace Microsoft.AspNetCore.ResponseCaching
                     }
 
                     // Request allows stale values
-                    if (age < context.RequestCacheControlHeaderValue.MaxStaleLimit)
+                    TimeSpan? maxStale = null;
+                    foreach (var c in context.HttpContext.Request.Headers[HeaderNames.CacheControl])
+                    {
+                        var index = c.IndexOf("max-stale");
+                        if (index != -1)
+                        {
+                            ++index;
+                            int seconds;
+                            if (TryParseValue(index, c, out seconds))
+                            {
+                                maxStale = new TimeSpan(0, 0, seconds);
+                            }
+                            break;
+                        }
+                    }
+                    if (age < maxStale)
                     {
                         return true;
                     }
 
                     return false;
                 }
-                else if (!cachedControlHeaders.MaxAge.HasValue && !context.RequestCacheControlHeaderValue.MaxAge.HasValue)
+
+                if (!cachedControlHeaders.MaxAge.HasValue && !maxAge.HasValue)
                 {
                     // Validate expiration
                     if (context.ResponseTime >= context.CachedResponseHeaders.Expires)
@@ -186,6 +242,38 @@ namespace Microsoft.AspNetCore.ResponseCaching
             }
 
             return true;
+        }
+
+        private bool TryParseValue(int startIndex, string header, out int seconds)
+        {
+            while (startIndex != header.Length)
+            {
+                if (header[startIndex] == '=')
+                {
+                    break;
+                }
+                ++startIndex;
+            }
+            if (startIndex != header.Length)
+            {
+                var endIndex = startIndex + 1;
+                while (endIndex < header.Length)
+                {
+                    var cc = header[endIndex];
+                    if ((cc >= '0') && (cc <= '9'))
+                    {
+                        endIndex++;
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+                seconds = int.Parse(header.Substring(startIndex + 1, endIndex - (startIndex + 1)));
+                return true;
+            }
+            seconds = 0;
+            return false;
         }
     }
 }
