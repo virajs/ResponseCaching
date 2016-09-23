@@ -2,6 +2,7 @@
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
+using System.Globalization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Primitives;
 using Microsoft.Net.Http.Headers;
@@ -10,7 +11,7 @@ namespace Microsoft.AspNetCore.ResponseCaching
 {
     public class ResponseCachePolicyProvider : IResponseCachePolicyProvider
     {
-        private static readonly CacheControlHeaderValue EmptyCacheControl = new CacheControlHeaderValue();
+        //private static readonly CacheControlHeaderValue EmptyCacheControl = new CacheControlHeaderValue();
 
         public virtual bool IsRequestCacheable(ResponseCacheContext context)
         {
@@ -68,9 +69,9 @@ namespace Microsoft.AspNetCore.ResponseCaching
             }
 
             // Check no-store
-            foreach (var c in context.HttpContext.Request.Headers[HeaderNames.CacheControl])
+            foreach (var header in context.HttpContext.Request.Headers[HeaderNames.CacheControl])
             {
-                if (c.Equals("no-store"))
+                if (header.Equals("no-store"))
                 {
                     return false;
                 }
@@ -153,21 +154,60 @@ namespace Microsoft.AspNetCore.ResponseCaching
             return true;
         }
 
+        //private bool TryGetHeaderValue(IHeaderDictionary headers, string headerName, string valueName, out int value)
+        //{
+        //    foreach (var header in headers[headerName])
+        //    {
+        //        var index = header.IndexOf(valueName);
+        //        if (index != -1)
+        //        {
+        //            ++index;
+
+        //            if (TryParseValue(index, header, out value))
+        //            {
+
+        //            }
+        //            return false;
+        //        }
+        //    }
+        //    value = 0;
+        //    return false;
+        //}
+
+        private static unsafe string InplaceToLower(string input)
+        {
+            fixed (char* str = input)
+            {
+                char* end = str + input.Length;
+                for (char* p = str; p < end; ++p)
+                {
+                    if (*p >= 'A' && *p <= 'Z')
+                    {
+                        *p += ' ';
+                    }
+                }
+            }
+            return input;
+        }
+
         public virtual bool IsCachedEntryFresh(ResponseCacheContext context)
         {
             var age = context.CachedEntryAge;
-            var cachedControlHeaders = context.CachedResponseHeaders.CacheControl ?? EmptyCacheControl;
+            var cachedControlHeaders = context.CachedResponseHeaders[HeaderNames.CacheControl];//context.CachedResponseHeaders.CacheControl ?? EmptyCacheControl;
+            var requestCacheControlHeaders = context.HttpContext.Request.Headers[HeaderNames.CacheControl];
 
             // Add min-fresh requirements
             //TimeSpan? minFresh = null;
-            foreach (var c in context.HttpContext.Request.Headers[HeaderNames.CacheControl])
+            for (int i = 0; i < requestCacheControlHeaders.Count; ++i)
+            //foreach (var header in requestCacheControlHeaders)
             {
-                var index = c.IndexOf("min-fresh");
+                var index = requestCacheControlHeaders[i].IndexOf("min-fresh", StringComparison.OrdinalIgnoreCase);
+
                 if (index != -1)
                 {
                     ++index;
                     int seconds;
-                    if (TryParseValue(index, c, out seconds))
+                    if (TryParseValue(index, requestCacheControlHeaders[i], out seconds))
                     {
                         age += new TimeSpan(0, 0, seconds);
                     }
@@ -175,48 +215,93 @@ namespace Microsoft.AspNetCore.ResponseCaching
                 }
             }
 
+            TimeSpan? sharedMaxAge = null;
+            for (int i = 0; i < cachedControlHeaders.Count; ++i)
+            //foreach (var header in cachedControlHeaders)
+            {
+                var index = cachedControlHeaders[i].IndexOf("s-maxage", StringComparison.OrdinalIgnoreCase);
+                if (index != -1)
+                {
+                    ++index;
+                    int seconds;
+                    if (TryParseValue(index, cachedControlHeaders[i], out seconds))
+                    {
+                        sharedMaxAge = new TimeSpan(0, 0, seconds);
+                    }
+                    break;
+                }
+            }
             // Validate shared max age, this overrides any max age settings for shared caches
-            if (age >= cachedControlHeaders.SharedMaxAge)
+            if (age >= sharedMaxAge)//cachedControlHeaders.SharedMaxAge)
             {
                 // shared max age implies must revalidate
                 return false;
             }
-            else if (!cachedControlHeaders.SharedMaxAge.HasValue)
+            else if (!sharedMaxAge.HasValue)//cachedControlHeaders.SharedMaxAge.HasValue)
             {
                 TimeSpan? maxAge = null;
-                foreach (var c in context.HttpContext.Request.Headers[HeaderNames.CacheControl])
+                for (int i = 0; i < requestCacheControlHeaders.Count; ++i)
+                //foreach (var header in requestCacheControlHeaders)
                 {
-                    var index = c.IndexOf("max-age");
+                    var index = requestCacheControlHeaders[i].IndexOf("max-age", StringComparison.OrdinalIgnoreCase);
                     if (index != -1)
                     {
                         ++index;
                         int seconds;
-                        if (TryParseValue(index, c, out seconds))
+                        if (TryParseValue(index, requestCacheControlHeaders[i], out seconds))
                         {
                             maxAge = new TimeSpan(0, 0, seconds);
                         }
                         break;
                     }
                 }
-                // Validate max age
-                if (age >= cachedControlHeaders.MaxAge || age >= maxAge)
+
+                TimeSpan? responseMaxAge = null;
+
+                for (int i = 0; i < cachedControlHeaders.Count; ++i)
+                //foreach (var header in cachedControlHeaders)
                 {
-                    // Must revalidate
-                    if (cachedControlHeaders.MustRevalidate)
+                    var index = cachedControlHeaders[i].IndexOf("max-age", StringComparison.OrdinalIgnoreCase);
+                    if (index != -1)
                     {
-                        return false;
+                        ++index;
+                        int seconds;
+                        if (TryParseValue(index, cachedControlHeaders[i], out seconds))
+                        {
+                            responseMaxAge = new TimeSpan(0, 0, seconds);
+                        }
+                        break;
                     }
+                }
+                // Validate max age
+                if (age >= responseMaxAge/*cachedControlHeaders.MaxAge*/ || age >= maxAge)
+                {
+                    for (int i = 0; i < cachedControlHeaders.Count; ++i)
+                    //foreach (var header in cachedControlHeaders)
+                    {
+                        var index = cachedControlHeaders[i].IndexOf("must-revalidate", StringComparison.OrdinalIgnoreCase);
+                        if (index != -1)
+                        {
+                            return false;
+                        }
+                    }
+                    // Must revalidate
+                    //if (cachedControlHeaders.MustRevalidate)
+                    //{
+                    //    return false;
+                    //}
 
                     // Request allows stale values
                     TimeSpan? maxStale = null;
-                    foreach (var c in context.HttpContext.Request.Headers[HeaderNames.CacheControl])
+                    for (int i = 0; i < requestCacheControlHeaders.Count; ++i)
+                    //foreach (var header in requestCacheControlHeaders)
                     {
-                        var index = c.IndexOf("max-stale");
+                        var index = requestCacheControlHeaders[i].IndexOf("max-stale", StringComparison.OrdinalIgnoreCase);
                         if (index != -1)
                         {
                             ++index;
                             int seconds;
-                            if (TryParseValue(index, c, out seconds))
+                            if (TryParseValue(index, requestCacheControlHeaders[i], out seconds))
                             {
                                 maxStale = new TimeSpan(0, 0, seconds);
                             }
@@ -231,12 +316,16 @@ namespace Microsoft.AspNetCore.ResponseCaching
                     return false;
                 }
 
-                if (!cachedControlHeaders.MaxAge.HasValue && !maxAge.HasValue)
+                if (!responseMaxAge.HasValue/*cachedControlHeaders.MaxAge.HasValue*/ && !maxAge.HasValue)
                 {
-                    // Validate expiration
-                    if (context.ResponseTime >= context.CachedResponseHeaders.Expires)
+                    DateTimeOffset expires;
+                    if (DateTimeOffset.TryParse(context.CachedResponseHeaders[HeaderNames.Expires], out expires))
                     {
-                        return false;
+                        // Validate expiration
+                        if (context.ResponseTime >= expires)
+                        {
+                            return false;
+                        }
                     }
                 }
             }
@@ -269,7 +358,7 @@ namespace Microsoft.AspNetCore.ResponseCaching
                         break;
                     }
                 }
-                seconds = int.Parse(header.Substring(startIndex + 1, endIndex - (startIndex + 1)));
+                seconds = int.Parse(header.Substring(startIndex + 1, endIndex - (startIndex + 1)), NumberStyles.None, NumberFormatInfo.InvariantInfo);
                 return true;
             }
             seconds = 0;

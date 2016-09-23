@@ -106,7 +106,7 @@ namespace Microsoft.AspNetCore.ResponseCaching
         internal async Task<bool> TryServeCachedResponseAsync(ResponseCacheContext context, CachedResponse cachedResponse)
         {
             context.CachedResponse = cachedResponse;
-            context.CachedResponseHeaders = new ResponseHeaders(cachedResponse.Headers);
+            context.CachedResponseHeaders = cachedResponse.Headers;//new ResponseHeaders(cachedResponse.Headers);
             context.ResponseTime = _options.SystemClock.UtcNow;
             var cachedEntryAge = context.ResponseTime - context.CachedResponse.Created;
             context.CachedEntryAge = cachedEntryAge > TimeSpan.Zero ? cachedEntryAge : TimeSpan.Zero;
@@ -345,32 +345,55 @@ namespace Microsoft.AspNetCore.ResponseCaching
         internal static bool ConditionalRequestSatisfied(ResponseCacheContext context)
         {
             var cachedResponseHeaders = context.CachedResponseHeaders;
-            var ifNoneMatchHeader = context.TypedRequestHeaders.IfNoneMatch;
+            var ifNoneMatchHeader = context.HttpContext.Request.Headers[HeaderNames.IfNoneMatch];//context.TypedRequestHeaders.IfNoneMatch;
 
-            if (ifNoneMatchHeader != null)
+            if (!StringValues.IsNullOrEmpty(ifNoneMatchHeader))
             {
                 if (ifNoneMatchHeader.Count == 1 && ifNoneMatchHeader[0].Equals(EntityTagHeaderValue.Any))
                 {
                     return true;
                 }
 
-                if (cachedResponseHeaders.ETag != null)
+                if (!StringValues.IsNullOrEmpty(cachedResponseHeaders[HeaderNames.ETag]))
                 {
-                    foreach (var tag in ifNoneMatchHeader)
+                    EntityTagHeaderValue eTag;
+                    if (EntityTagHeaderValue.TryParse(cachedResponseHeaders[HeaderNames.ETag], out eTag))
                     {
-                        if (cachedResponseHeaders.ETag.Compare(tag, useStrongComparison: true))
+                        foreach (var tag in ifNoneMatchHeader)
                         {
-                            return true;
+                            EntityTagHeaderValue eetag;
+                            if (EntityTagHeaderValue.TryParse(tag, out eetag))
+                            {
+                                if (eTag.Compare(eetag, useStrongComparison: true))
+                                {
+                                    return true;
+                                }
+                            }
                         }
                     }
                 }
             }
             else
             {
-                var ifUnmodifiedSince = context.TypedRequestHeaders.IfUnmodifiedSince;
-                if (ifUnmodifiedSince != null && (cachedResponseHeaders.LastModified ?? cachedResponseHeaders.Date) <= ifUnmodifiedSince)
+                var ifUnmodifiedSince = context.HttpContext.Request.Headers[HeaderNames.IfUnmodifiedSince];//context.TypedRequestHeaders.IfUnmodifiedSince;
+                if (!StringValues.IsNullOrEmpty(ifUnmodifiedSince))// && (cachedResponseHeaders.LastModified ?? cachedResponseHeaders.Date) <= ifUnmodifiedSince)
                 {
-                    return true;
+                    DateTimeOffset modified;
+                    if (!DateTimeOffset.TryParse(cachedResponseHeaders[HeaderNames.LastModified], out modified))
+                    {
+                        if (!DateTimeOffset.TryParse(cachedResponseHeaders[HeaderNames.Date], out modified))
+                        {
+                            return false;
+                        }
+                    }
+                    DateTimeOffset unmodifiedSince;
+                    if (DateTimeOffset.TryParse(ifUnmodifiedSince, out unmodifiedSince))
+                    {
+                        if (modified <= unmodifiedSince)
+                        {
+                            return true;
+                        }
+                    }
                 }
             }
 

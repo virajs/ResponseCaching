@@ -15,7 +15,7 @@ namespace Microsoft.AspNetCore.ResponseCaching
     {
         private static readonly CacheControlHeaderValue EmptyCacheControl = new CacheControlHeaderValue();
 
-        private RequestHeaders _requestHeaders;
+        //private RequestHeaders _requestHeaders;
         private ResponseHeaders _responseHeaders;
         private CacheControlHeaderValue _responseCacheControl;
         private DateTimeOffset? _responseDate;
@@ -55,19 +55,19 @@ namespace Microsoft.AspNetCore.ResponseCaching
 
         internal IHttpSendFileFeature OriginalSendFileFeature { get; set; }
 
-        internal ResponseHeaders CachedResponseHeaders { get; set; }
+        internal IHeaderDictionary CachedResponseHeaders { get; set; }
 
-        internal RequestHeaders TypedRequestHeaders
-        {
-            get
-            {
-                if (_requestHeaders == null)
-                {
-                    _requestHeaders = HttpContext.Request.GetTypedHeaders();
-                }
-                return _requestHeaders;
-            }
-        }
+        //internal RequestHeaders TypedRequestHeaders
+        //{
+        //    get
+        //    {
+        //        if (_requestHeaders == null)
+        //        {
+        //            _requestHeaders = HttpContext.Request.GetTypedHeaders();
+        //        }
+        //        return _requestHeaders;
+        //    }
+        //}
 
         internal ResponseHeaders TypedResponseHeaders
         {
