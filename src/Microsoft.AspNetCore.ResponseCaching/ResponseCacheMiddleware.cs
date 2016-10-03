@@ -191,11 +191,14 @@ namespace Microsoft.AspNetCore.ResponseCaching
                 return true;
             }
 
-            if (context.RequestCacheControlHeaderValue.OnlyIfCached)
+            foreach (var header in context.HttpContext.Request.Headers[HeaderNames.CacheControl])
             {
-                _logger.LogGatewayTimeoutServed();
-                context.HttpContext.Response.StatusCode = StatusCodes.Status504GatewayTimeout;
-                return true;
+                if (header.Equals("only-if-cached"))
+                {
+                    _logger.LogGatewayTimeoutServed();
+                    context.HttpContext.Response.StatusCode = StatusCodes.Status504GatewayTimeout;
+                    return true;
+                }
             }
 
             _logger.LogNoResponseServed();
@@ -342,11 +345,11 @@ namespace Microsoft.AspNetCore.ResponseCaching
         internal static bool ContentIsNotModified(ResponseCacheContext context)
         {
             var cachedResponseHeaders = context.CachedResponseHeaders;
-            var ifNoneMatchHeader = context.TypedRequestHeaders.IfNoneMatch;
+            var ifNoneMatchHeader = context.HttpContext.Request.Headers[HeaderNames.IfNoneMatch];
 
-            if (ifNoneMatchHeader != null)
+            if (!StringValues.IsNullOrEmpty(ifNoneMatchHeader))
             {
-                if (ifNoneMatchHeader.Count == 1 && ifNoneMatchHeader[0].Equals(EntityTagHeaderValue.Any))
+                if (ifNoneMatchHeader.Count == 1 && ifNoneMatchHeader[0].Equals(EntityTagHeaderValue.Any.Tag))
                 {
                     context.Logger.LogNotModifiedIfNoneMatchStar();
                     return true;
@@ -356,24 +359,32 @@ namespace Microsoft.AspNetCore.ResponseCaching
                 {
                     foreach (var tag in ifNoneMatchHeader)
                     {
-                        if (cachedResponseHeaders.ETag.Compare(tag, useStrongComparison: false))
+                        EntityTagHeaderValue requestETag;
+                        if (EntityTagHeaderValue.TryParse(tag, out requestETag))
                         {
-                            context.Logger.LogNotModifiedIfNoneMatchMatched(tag);
-                            return true;
+                            if (cachedResponseHeaders.ETag.Compare(requestETag, useStrongComparison: false))
+                            {
+                                context.Logger.LogNotModifiedIfNoneMatchMatched(requestETag);
+                                return true;
+                            }
                         }
                     }
                 }
             }
             else
             {
-                var ifUnmodifiedSince = context.TypedRequestHeaders.IfUnmodifiedSince;
-                if (ifUnmodifiedSince != null)
+                var ifUnmodifiedSince = context.HttpContext.Request.Headers[HeaderNames.IfUnmodifiedSince];
+                if (!StringValues.IsNullOrEmpty(ifUnmodifiedSince))
                 {
-                    var lastModified = cachedResponseHeaders.LastModified ?? cachedResponseHeaders.Date;
-                    if (lastModified <= ifUnmodifiedSince)
+                    DateTimeOffset unmodifiedSince;
+                    if (DateTimeOffset.TryParse(ifUnmodifiedSince, out unmodifiedSince))
                     {
-                        context.Logger.LogNotModifiedIfUnmodifiedSinceSatisfied(lastModified.Value, ifUnmodifiedSince.Value);
-                        return true;
+                        var lastModified = cachedResponseHeaders.LastModified ?? cachedResponseHeaders.Date;
+                        if (lastModified <= unmodifiedSince)
+                        {
+                            context.Logger.LogNotModifiedIfUnmodifiedSinceSatisfied(lastModified.Value, unmodifiedSince);
+                            return true;
+                        }
                     }
                 }
             }

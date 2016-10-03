@@ -25,10 +25,10 @@ namespace Microsoft.AspNetCore.ResponseCaching.Tests
             var sink = new TestSink();
             var middleware = TestUtils.CreateTestMiddleware(testSink: sink, store: store, keyProvider: new TestResponseCacheKeyProvider());
             var context = TestUtils.CreateTestContext();
-            context.TypedRequestHeaders.CacheControl = new CacheControlHeaderValue()
+            context.HttpContext.Request.Headers[HeaderNames.CacheControl] = new CacheControlHeaderValue()
             {
                 OnlyIfCached = true
-            };
+            }.ToString();
 
             Assert.True(await middleware.TryServeFromCacheAsync(context));
             Assert.Equal(StatusCodes.Status504GatewayTimeout, context.HttpContext.Response.StatusCode);
@@ -165,7 +165,7 @@ namespace Microsoft.AspNetCore.ResponseCaching.Tests
             var context = TestUtils.CreateTestContext(sink);
             context.CachedResponseHeaders = new ResponseHeaders(new HeaderDictionary());
 
-            context.TypedRequestHeaders.IfUnmodifiedSince = utcNow;
+            context.HttpContext.Request.Headers[HeaderNames.IfUnmodifiedSince] = HeaderUtilities.FormatDate(utcNow);
 
             // Verify modifications in the past succeeds
             context.CachedResponseHeaders.Date = utcNow - TimeSpan.FromSeconds(10);
@@ -196,7 +196,7 @@ namespace Microsoft.AspNetCore.ResponseCaching.Tests
             var context = TestUtils.CreateTestContext(sink);
             context.CachedResponseHeaders = new ResponseHeaders(new HeaderDictionary());
 
-            context.TypedRequestHeaders.IfUnmodifiedSince = utcNow;
+            context.HttpContext.Request.Headers[HeaderNames.IfUnmodifiedSince] = HeaderUtilities.FormatDate(utcNow);
 
             // Verify modifications in the past succeeds
             context.CachedResponseHeaders.Date = utcNow + TimeSpan.FromSeconds(10);
@@ -231,10 +231,10 @@ namespace Microsoft.AspNetCore.ResponseCaching.Tests
             context.CachedResponseHeaders = new ResponseHeaders(new HeaderDictionary());
 
             // This would fail the IfUnmodifiedSince checks
-            context.TypedRequestHeaders.IfUnmodifiedSince = utcNow;
+            context.HttpContext.Request.Headers[HeaderNames.IfUnmodifiedSince] = HeaderUtilities.FormatDate(utcNow);
             context.CachedResponseHeaders.LastModified = utcNow + TimeSpan.FromSeconds(10);
 
-            context.TypedRequestHeaders.IfNoneMatch = new List<EntityTagHeaderValue>(new[] { EntityTagHeaderValue.Any });
+            context.HttpContext.Request.Headers[HeaderNames.IfNoneMatch] = EntityTagHeaderValue.Any.ToString();
             Assert.True(ResponseCacheMiddleware.ContentIsNotModified(context));
             TestUtils.AssertLoggedMessages(
                 sink.Writes,
@@ -250,10 +250,10 @@ namespace Microsoft.AspNetCore.ResponseCaching.Tests
             context.CachedResponseHeaders = new ResponseHeaders(new HeaderDictionary());
 
             // This would pass the IfUnmodifiedSince checks
-            context.TypedRequestHeaders.IfUnmodifiedSince = utcNow;
+            context.HttpContext.Request.Headers[HeaderNames.IfUnmodifiedSince] = HeaderUtilities.FormatDate(utcNow);
             context.CachedResponseHeaders.LastModified = utcNow - TimeSpan.FromSeconds(10);
 
-            context.TypedRequestHeaders.IfNoneMatch = new List<EntityTagHeaderValue>(new[] { new EntityTagHeaderValue("\"E1\"") });
+            context.HttpContext.Request.Headers[HeaderNames.IfNoneMatch] = new List<EntityTagHeaderValue>(new[] { new EntityTagHeaderValue("\"E1\"") }).ToString();
             Assert.False(ResponseCacheMiddleware.ContentIsNotModified(context));
             Assert.Empty(sink.Writes);
         }
@@ -265,7 +265,7 @@ namespace Microsoft.AspNetCore.ResponseCaching.Tests
             var context = TestUtils.CreateTestContext(sink);
             context.CachedResponseHeaders = new ResponseHeaders(new HeaderDictionary());
 
-            context.TypedRequestHeaders.IfNoneMatch = new List<EntityTagHeaderValue>(new[] { new EntityTagHeaderValue("\"E1\"") });
+            context.HttpContext.Request.Headers[HeaderNames.IfNoneMatch] = new List<EntityTagHeaderValue>(new[] { new EntityTagHeaderValue("\"E1\"") }).ToString();
 
             Assert.False(ResponseCacheMiddleware.ContentIsNotModified(context));
             Assert.Empty(sink.Writes);
@@ -296,7 +296,7 @@ namespace Microsoft.AspNetCore.ResponseCaching.Tests
                 ETag = responseETag
             };
 
-            context.TypedRequestHeaders.IfNoneMatch = new List<EntityTagHeaderValue>(new[] { requestETag });
+            context.HttpContext.Request.Headers[HeaderNames.IfNoneMatch] = requestETag.ToString();
 
             Assert.True(ResponseCacheMiddleware.ContentIsNotModified(context));
             TestUtils.AssertLoggedMessages(
@@ -314,7 +314,7 @@ namespace Microsoft.AspNetCore.ResponseCaching.Tests
                 ETag = new EntityTagHeaderValue("\"E2\"")
             };
 
-            context.TypedRequestHeaders.IfNoneMatch = new List<EntityTagHeaderValue>(new[] { new EntityTagHeaderValue("\"E1\"") });
+            context.HttpContext.Request.Headers[HeaderNames.IfNoneMatch] = new List<EntityTagHeaderValue>(new[] { new EntityTagHeaderValue("\"E1\"") }).ToString();
 
             Assert.False(ResponseCacheMiddleware.ContentIsNotModified(context));
             Assert.Empty(sink.Writes);
