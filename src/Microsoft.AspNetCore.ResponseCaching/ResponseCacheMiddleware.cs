@@ -191,14 +191,11 @@ namespace Microsoft.AspNetCore.ResponseCaching
                 return true;
             }
 
-            foreach (var header in context.HttpContext.Request.Headers[HeaderNames.CacheControl])
+            if (HttpHeaderParsingHelpers.HeaderContains(context.HttpContext.Request.Headers[HeaderNames.CacheControl], CacheControlValues.OnlyIfCachedString))
             {
-                if (header.IndexOf(CacheControlValues.OnlyIfCachedString, StringComparison.OrdinalIgnoreCase) != -1)
-                {
-                    _logger.LogGatewayTimeoutServed();
-                    context.HttpContext.Response.StatusCode = StatusCodes.Status504GatewayTimeout;
-                    return true;
-                }
+                _logger.LogGatewayTimeoutServed();
+                context.HttpContext.Response.StatusCode = StatusCodes.Status504GatewayTimeout;
+                return true;
             }
 
             _logger.LogNoResponseServed();
@@ -379,20 +376,18 @@ namespace Microsoft.AspNetCore.ResponseCaching
                 if (!StringValues.IsNullOrEmpty(ifUnmodifiedSince))
                 {
                     DateTimeOffset modified;
-                    if (!ParsingHelpers.TryParseDate(cachedResponseHeaders[HeaderNames.LastModified], out modified) &&
-                        !ParsingHelpers.TryParseDate(cachedResponseHeaders[HeaderNames.Date], out modified))
+                    if (!HttpHeaderParsingHelpers.TryParseHeaderDate(cachedResponseHeaders[HeaderNames.LastModified], out modified) &&
+                        !HttpHeaderParsingHelpers.TryParseHeaderDate(cachedResponseHeaders[HeaderNames.Date], out modified))
                     {
                         return false;
                     }
 
                     DateTimeOffset unmodifiedSince;
-                    if (ParsingHelpers.TryParseDate(ifUnmodifiedSince, out unmodifiedSince))
+                    if (HttpHeaderParsingHelpers.TryParseHeaderDate(ifUnmodifiedSince, out unmodifiedSince) &&
+                        modified <= unmodifiedSince)
                     {
-                        if (modified <= unmodifiedSince)
-                        {
-                            context.Logger.LogNotModifiedIfUnmodifiedSinceSatisfied(modified, unmodifiedSince);
-                            return true;
-                        }
+                        context.Logger.LogNotModifiedIfUnmodifiedSinceSatisfied(modified, unmodifiedSince);
+                        return true;
                     }
                 }
             }
